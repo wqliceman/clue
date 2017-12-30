@@ -63,6 +63,10 @@
 #  define clue_LOG_TO_SYSLOG    LOG_TO_SYSLOG
 # endif
 
+# ifdef LOG_TO_FILE
+# define clue_LOG_TO_FILE		LOG_TO_FILE
+#endif
+
 # ifdef  LOG_EXPRESSION
 #  define clue_LOG_EXPRESSION   LOG_EXPRESSIONLOG_TO_SYSLOG
 # endif
@@ -75,7 +79,9 @@
     !defined( clue_LOG_TO_DEBUGGER ) && \
     !defined( clue_LOG_TO_EVENTLOG ) && \
     !defined( clue_LOG_TO_STRING   ) && \
-    !defined( clue_LOG_TO_SYSLOG   )
+    !defined( clue_LOG_TO_SYSLOG   ) && \
+    !defined( clue_LOG_TO_FILE	   ) && \
+	!defined( clue_LOG_TO_NONE	   )	
 # if defined( _WINDOWS )
 #  define clue_LOG_TO_DEBUGGER
 #elif defined( NTS_TO_BE_DETERMINED_UNIX )
@@ -89,6 +95,7 @@
     defined( clue_LOG_TO_DEBUGGER ) + \
     defined( clue_LOG_TO_EVENTLOG ) + \
     defined( clue_LOG_TO_STRING   ) + \
+    defined( clue_LOG_TO_FILE     ) + \
     defined( clue_LOG_TO_SYSLOG   ) > 1
 # error Please specify one, or none of [clue_]LOG_TO_CONSOLE, [clue_]LOG_TO_DEBUGGER [clue_]LOG_TO_EVENTLOG, [clue_]LOG_TO_STRING and [clue_]LOG_TO_SYSLOG
 #endif
@@ -143,6 +150,10 @@
 # include <windows.h>
 #endif
 
+#ifdef clue_LOG_TO_FILE
+# include <fstream>
+#endif
+
 #ifdef clue_LOG_TO_SYSLOG
 # include <syslog.h>
 #endif
@@ -177,7 +188,11 @@
 #define clue_LOG_SEV_DEBUG_TEXT      "Debug"
 
 #ifndef  clue_LOG_MODULE_NAME
+#ifdef clue_LOG_TO_FILE
+# define clue_LOG_MODULE_NAME "clue_log_file"
+#else
 # define clue_LOG_MODULE_NAME ""
+#endif
 #endif
 
 #ifndef  clue_LOG_PREFIX_WIDTH
@@ -277,6 +292,20 @@
      } while( clue::is_true(false) )
 #endif 
 
+#if defined( clue_LOG_TO_FILE ) && !defined( clue_LOG_EXPRESSION )
+# define clue_LOG_EXPRESSION( severity, expr ) \
+    do { \
+        if ( clue_is_active_build( severity ) ) { \
+            if ( clue_is_active( severity ) ) { \
+                clue::filelog(clue_LOG_MODULE_NAME) << \
+                    clue::now_text() << std::setw( clue_LOG_PREFIX_WIDTH ) << \
+                    clue::to_severity_text(severity) << \
+                    clue::to_module_text(clue_LOG_MODULE_NAME) << ": " << expr << "\n"; \
+						            } \
+				        } \
+		    } while( clue::is_true( false ) )
+#endif
+
 #if defined( clue_LOG_TO_EVENTLOG ) && !defined( clue_LOG_EXPRESSION )
 # define clue_LOG_EXPRESSION( severity, expr ) \
     do { \
@@ -318,6 +347,19 @@
         } \
      } while( clue::is_true(false) )
 #endif 
+
+#if defined( clue_LOG_TO_NONE ) && !defined( clue_LOG_EXPRESSION)
+# define clue_LOG_EXPRESSION( severity, expr ) \
+    do { \
+        if ( clue_is_active_build( severity ) ) { \
+            if ( clue_is_active( severity ) ) { \
+                clue::none() << \
+                    std::setw( clue_LOG_PREFIX_WIDTH ) << clue::to_severity_text( severity ) << \
+                    clue::to_module_text(clue_LOG_MODULE_NAME) << ": " << expr; \
+						            } \
+				        } \
+		     } while( clue::is_true(false) )
+#endif
 
 namespace clue
 {
@@ -405,6 +447,24 @@ inline std::string now_text()
 
 #endif // clue_NO_TIMESTAMP
 
+#ifdef clue_LOG_TO_NONE
+namespace clue
+{
+	class none 
+	{
+	public:
+		none(){}
+		~none(){}
+
+		template<typename T>
+		none& operator<<( T const & that )
+		{
+			return *this;
+		}
+	};
+} //
+#endif // clue_LOG_TO_NONE
+
 #ifdef clue_LOG_TO_DEBUGGER_WINDOWS
 
 namespace clue
@@ -418,7 +478,7 @@ public:
 
     ~windbg()
     {
-        OutputDebugString( stream.str().c_str() );
+        OutputDebugStringA( stream.str().c_str() );
     }
 
     template<typename T>
@@ -616,6 +676,44 @@ private:
 } // namespace clue
 
 #endif //clue_LOG_TO_SYSLOG
+
+#ifdef  clue_LOG_TO_FILE
+namespace clue {
+
+	class filelog
+	{
+	public:
+		filelog(std::string const & filename)
+			:filename_(filename)
+			, stream() {}
+
+		~filelog()
+		{
+			const std::string text = stream.str();
+			std::ofstream savelog;
+			std::string logfilename = filename_ + ".log";
+			savelog.open(logfilename, std::ios::app);
+			if (savelog.is_open())
+			{
+				savelog << text;
+			}
+			savelog.close();
+		}
+
+		template<typename T>
+		filelog& operator<<(T const & that)
+		{
+			stream << that;
+			return *this;
+		}
+
+	private:
+		std::ostringstream stream;
+		std::string	filename_;
+	};
+} // namespace clue
+#endif // clue_LOG_TO_FILE
+
 
 #ifdef clue_COMPILER_IS_MSVC
 # pragma warning( pop ) 
